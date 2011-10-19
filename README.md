@@ -31,10 +31,7 @@ Using the library
 
 	import "go/pkg"
 
-Once the library is installed, running godoc gives you access to the package
-documentation. This gives a more detailed description of how to use the library.
-
-An example of the library's use:
+Check the source for a more detailed look at the API. For now, an example of the library's use:
 
 	package main
 	

@@ -81,9 +81,8 @@ var (
 // is a rest parameter (i.e. defined with "..." before the type). Unnamed
 // entries in either of these fields use "?" for their Name field.
 //
-// Knowing these things about the layout allows to
-//
-// All duplicate types in a package 
+// All duplicate types in a package are removed. As a result, == is enough to
+// see if two types are the same.
 //
 type Type struct {
 	Named
