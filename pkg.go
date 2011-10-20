@@ -40,6 +40,7 @@ import (
 	"strings"
 	"unicode"
 	"utf8"
+//	"fmt"
 )
 
 var (
@@ -189,102 +190,50 @@ func (s *tokenStream) next() {
 	s.p++
 }
 
+func (s *tokenStream) add(t string) {
+	if t != "" {
+		s.ts = append(s.ts, t)
+	}
+}
+
 func (s *tokenStream) init(line string) *tokenStream {
-	s.ts = prepareLine(line)
-	return s
-}
-
-// stick spaces on either side if not already there
-func padChar(line string, pos int) (string, int) {
-	p := pos
-	insert := string(line[pos])
-	if pos == 0 {
-		goto after
-	}
-	if line[pos-1] == ' ' {
-		goto after
-	}
-	insert = " " + insert
-	p++
-after:
-	if pos == len(line)-1 {
-		goto build
-	}
-	if line[pos+1] == ' ' {
-		goto build
-	}
-	insert = insert + " "
-	p++
-build:
-	return line[:pos] + insert + line[pos+1:], p
-}
-
-// pad all instances of a particular character so they will be tokenised alone
-func padTokens(line string, c byte) string {
-	for i := 0; i < len(line); i++ {
-		if line[i] == c {
-			line, i = padChar(line, i)
-		}
-	}
-	return line
-}
-
-// replace quotes with a marker, return all quotes ina a slice
-func extractQuotes(line string) (qu []string, newline string) {
-	var inqu, inesc bool
-	var cur string
+	cur := ""
+	inqu, inesc := false, false
 	for _, c := range []byte(line) {
-		switch {
-		case inqu:
+		if inesc {
+			inesc = false
 			cur += string(c)
-			switch {
-			case inesc:
-				inesc = false
-			case c == '\\':
-				inesc = true
-			case c == '"':
-				qu = append(qu, cur)
-				newline += string(1)
+			continue
+		}
+		if inqu {
+			switch c {
+			case '"':
 				inqu = false
+			case '\\':
+				inesc = true
 			}
-		case c == '"':
+			cur += string(c)
+			continue
+		}
+		switch c {
+		case '\t':
+		case ' ':
+			s.add(cur)
+			cur = ""
+		case '"':
 			inqu = true
-			cur = "\""
+			cur += "\""
+		case '(', ')', '{', '}', '[', ']', ',', ';', '*':
+			s.add(cur)
+			s.add(string(c))
+			cur = ""
 		default:
-			newline += string(c)
+			cur += string(c)
 		}
 	}
-	return
-}
-
-// replace marker with relevant quotes in text
-func reinsertQuotes(ts, qu []string) []string {
-	curq := 0
-	for i, t := range ts {
-		next := ""
-		for _, c := range []byte(t) {
-			if c == 1 {
-				next += qu[curq]
-				curq++
-			} else {
-				next += string(c)
-			}
-		}
-		ts[i] = next
-	}
-	return ts
-}
-
-// turn a line into a list of tokens
-func prepareLine(line string) []string {
-	var qu []string
-	line = strings.TrimLeft(line, "\t")
-	qu, line = extractQuotes(line)
-	for _, c := range []byte{',', ';', '(', ')', '[', ']', '*'} {
-		line = padTokens(line, c)
-	}
-	res := strings.Split(line, " ")
-	return reinsertQuotes(res, qu)
+	s.add(cur)
+//	fmt.Printf("%#v\n", s.ts)
+	return s
 }
 
 // pull out the dotted name into its constituent parts
