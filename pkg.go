@@ -40,7 +40,6 @@ import (
 	"strings"
 	"unicode"
 	"utf8"
-//	"fmt"
 )
 
 var (
@@ -232,7 +231,6 @@ func (s *tokenStream) init(line string) *tokenStream {
 		}
 	}
 	s.add(cur)
-//	fmt.Printf("%#v\n", s.ts)
 	return s
 }
 
