@@ -72,4 +72,34 @@ library's use:
 This prints the names of all the exported methods on all the exported types, 
 along with the exported methods on their pointer types, if they exist.
 
+Testing
+-------
+
+Currently to test it I have a program that looks like this:
+
+	package main
+	
+	import (
+		"fmt"
+		"go/pkg"
+	)
+	
+	func main() {
+		_, err := pkg.Open(os.Args[1])
+		if err != nil {
+			fmt.Println("FAILED:", os.Args[1])
+		} else {
+			fmt.Println("OK:    ", os.Args[1])
+		}
+	}
+
+Then I run something like this:
+
+	find -name "$GOROOT/pkg" -name "*.a" -exec ./test {} \; | grep FAILED
+
+and see if anything pops up. The parser was written this way. Yeah...
+
+This will only pick up if the library falls over in parsing. I used it during
+development of the parser. More test cases need to be assembled, but this will 
+take time.
 

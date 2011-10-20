@@ -155,6 +155,10 @@ func (n *Named) Imported() bool {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+// The export syntax is a fairly simple affair. Everything is named before it
+// happens (apart from :"something" bits that keep popping up) and so it can be
+// parsed with a simple recursive descent parser.
+
 // this begins and ends the exports section
 var sig = []byte("\n\n$$  ")
 
