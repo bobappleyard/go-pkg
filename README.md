@@ -31,7 +31,8 @@ Using the library
 
 	import "go/pkg"
 
-Check the source for a more detailed look at the API. For now, an example of the library's use:
+Check the source for a more detailed look at the API. For now, an example of the 
+library's use:
 
 	package main
 	
