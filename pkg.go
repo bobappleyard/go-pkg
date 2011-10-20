@@ -344,11 +344,11 @@ func (p *Pkg) parse(decls string) (*Pkg, os.Error) {
 
 // parse main declaration types
 func (p *Pkg) parseDecl(ts *tokenStream) (err os.Error) {
-/*	defer func() {
+	defer func() {
 		if e := recover(); e != nil {
 			err = UnknownFormat
 		}
-	}()*/
+	}()
 	switch ts.token {
 	case "import":
 		s, _ := strconv.Unquote(ts.ts[2])
