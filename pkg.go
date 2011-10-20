@@ -76,9 +76,9 @@ var (
 // type.
 //
 // Functions use the In field for the parameters and the Out field for the
-// return types. Additionally, if the Elem field is not nil the last parameter
-// is a rest parameter (i.e. defined with "..." before the type). Unnamed
-// entries in either of these fields use "?" for their Name field.
+// return types. Unnamed entries in either of these fields use "?" for their 
+// Name field. If the last parameter has a value of "..." then it is a rest
+// parameter.
 //
 // All duplicate types in a package are removed. As a result, == is enough to
 // see if two types are the same.
@@ -176,61 +176,101 @@ func extractExportSection(data []byte) string {
 	return string(data[:to])
 }
 
+// represents a tokenised line
 type tokenStream struct {
+	token string
 	ts []string
 	p int
 }
 
-func (s *tokenStream) token() string {
-	return s.ts[s.p]
-}
-
+// move to the next token
 func (s *tokenStream) next() {
 	s.p++
+	if s.end() {
+		s.token = ""
+	} else {
+		s.token = s.ts[s.p]
+	}
 }
 
+func (s *tokenStream) end() bool {
+	return s.p >= len(s.ts)
+}
+
+// add a token to the stream
 func (s *tokenStream) add(t string) {
 	if t != "" {
 		s.ts = append(s.ts, t)
 	}
 }
 
-func (s *tokenStream) init(line string) *tokenStream {
-	cur := ""
-	inqu, inesc := false, false
-	for _, c := range []byte(line) {
-		if inesc {
-			inesc = false
-			cur += string(c)
-			continue
-		}
-		if inqu {
-			switch c {
-			case '"':
-				inqu = false
-			case '\\':
-				inesc = true
-			}
-			cur += string(c)
-			continue
-		}
-		switch c {
-		case '\t':
-		case ' ':
-			s.add(cur)
-			cur = ""
-		case '"':
-			inqu = true
-			cur += "\""
-		case '(', ')', '{', '}', '[', ']', ',', ';', '*':
-			s.add(cur)
-			s.add(string(c))
-			cur = ""
-		default:
-			cur += string(c)
-		}
+// lexing
+type tokenState func(s *tokenStream, c byte) tokenState
+
+// ignore tabs, split on spaces, dispatch to dot and quote matchers
+func inLine(s *tokenStream, c byte) tokenState {
+	switch c {
+	case '\t':
+	case ' ':
+		s.add(s.token)
+		s.token = ""
+	case '"':
+		s.token += "\""
+		return inQu
+	case '(', ')', '{', '}', '[', ']', ',', ';', '*':
+		s.add(s.token)
+		s.add(string(c))
+		s.token = ""
+	case '.':
+		s.token += "."
+		return inDots
+	default:
+		s.token += string(c)
 	}
-	s.add(cur)
+	return inLine
+}
+
+// escapes all the other parsing going on until "
+func inQu(s *tokenStream, c byte) tokenState {
+	s.token += string(c)
+	switch c {
+	case '"':
+		return inLine
+	case '\\':
+		return inEsc
+	}
+	return inQu
+}
+
+// escape for, for insance, "
+func inEsc(s *tokenStream, c byte) tokenState {
+	s.token += string(c)
+	return inQu
+}
+
+// matching rest parameters: push the info onto the name rather than the type
+func inDots(s *tokenStream, c byte) tokenState {
+	s.token += string(c)
+	if c != '.' {
+		return inLine
+	}
+	if s.token == "..." {
+		s.ts[len(s.ts)-1] += "..."
+		s.token = ""
+		return inLine
+	}
+	return inDots
+}
+
+// scan the line and update the token list accordingly
+func (s *tokenStream) init(line string) *tokenStream {
+	s.token = ""
+	state := inLine
+	for _, c := range []byte(line) {
+		state = state(s, c)
+	}
+	s.add(s.token)
+	s.token = s.ts[0]
 	return s
 }
 
@@ -246,11 +286,11 @@ func parseName(n string) Named {
 
 // check if our loop in a list of some kind is done
 func finished(ts *tokenStream, end, mid string) bool {
-	if ts.token() == end {
+	if ts.token == end {
 		ts.next()
 		return true
 	}
-	if ts.token() == mid {
+	if ts.token == mid {
 		ts.next()
 	}
 	return false
@@ -260,7 +300,7 @@ func finished(ts *tokenStream, end, mid string) bool {
 func skipUntil(end []string, ts *tokenStream) {
 	for {
 		for _, e := range end {
-			if ts.token() == e {
+			if ts.token == e {
 				return
 			}
 		}
@@ -270,19 +310,19 @@ func skipUntil(end []string, ts *tokenStream) {
 
 // generic list: parameters
 func parseParams(ts *tokenStream) []*Item {
-	if ts.token() != "(" {
+	if ts.token != "(" {
 		panic(UnknownFormat)
 	}
 	ts.next()
 	res := []*Item{}
 	for !finished(ts, ")", ",") {
 		a := new(Item)
-		a.Name = ts.token()
+		a.Name = ts.token
 		ts.next()
 		a.Type = new(Type)
 		a.Type.parse(ts)
 		res = append(res, a)
-		if ts.token()[0] == ':' {
+		if ts.token[0] == ':' {
 			ts.next()
 		}
 	}
@@ -304,59 +344,59 @@ func (p *Pkg) parse(decls string) (*Pkg, os.Error) {
 
 // parse main declaration types
 func (p *Pkg) parseDecl(ts *tokenStream) (err os.Error) {
-	defer func() {
+/*	defer func() {
 		if e := recover(); e != nil {
 			err = UnknownFormat
 		}
-	}()
-	switch ts.token() {
+	}()*/
+	switch ts.token {
 	case "import":
 		s, _ := strconv.Unquote(ts.ts[2])
 		p.Import = append(p.Import, s)
 	case "var":
 		ts.next()
 		v := new(Item)
-		v.Named = parseName(ts.token())
+		v.Named = parseName(ts.token)
 		ts.next()
 		v.Type = new(Type).parse(ts)
 		p.Var = append(p.Var, v)
 	case "type":
 		ts.next()
-		t := p.getNamedType(&Type{Named: parseName(ts.token())}, true)
+		t := p.getNamedType(&Type{Named: parseName(ts.token)}, true)
 		ts.next()
 		t.parse(ts)
 	case "func":
 		ts.next()
 		f := new(Item)
-		if ts.token() == "(" {
+		if ts.token == "(" {
 		// method declaration
 			rcv := parseParams(ts)
-			f.Name = ts.token()
+			f.Name = ts.token
 			ts.next()
 			p.addMethod(rcv[0].Type, f)
 		} else {
 		// function declaration
 			p.Func = append(p.Func, f)
-			f.Named = parseName(ts.token())
+			f.Named = parseName(ts.token)
 			ts.next()
 		}
 		f.Type = new(Type).parseFunc(ts)
 	case "const":
 		ts.next()
 		c := new(Item)
-		c.Named = parseName(ts.token())
+		c.Named = parseName(ts.token)
 		ts.next()
 		// untyped constant
-		if ts.token() == "=" {
+		if ts.token == "=" {
 			ts.next()
-			c.Value = ts.token()
+			c.Value = ts.token
 			return nil
 		}
 		c.Type = new(Type).parse(ts)
-		if ts.token() != "=" {
+		if ts.token != "=" {
 			panic(UnknownFormat)
 		}
-		c.Value = ts.token()
+		c.Value = ts.token
 		p.Const = append(p.Const, c)
 	default:
 		return UnknownSpec
@@ -366,7 +406,7 @@ func (p *Pkg) parseDecl(ts *tokenStream) (err os.Error) {
 
 // dispatch on type kinds
 func (t *Type) parse(ts *tokenStream) *Type {
-	switch ts.token() {
+	switch ts.token {
 	case "*":
 		ts.next()
 		t.parsePtr(ts)
@@ -402,18 +442,18 @@ func (t *Type) parsePtr(ts *tokenStream) {
 
 // arrays and slices
 func (t *Type) parseArray(ts *tokenStream) {
-	if ts.token() == "]" {
+	if ts.token == "]" {
 		t.Kind = reflect.Slice
 		ts.next()
 	} else {
 		t.Kind = reflect.Array
-		s, err := strconv.Atoi(ts.token())
+		s, err := strconv.Atoi(ts.token)
 		if err != nil {
 			panic(err)
 		}
 		t.Size = s
 		ts.next()
-		if ts.token() != "]" {
+		if ts.token != "]" {
 			panic(UnknownFormat)
 		}
 		ts.next()
@@ -424,12 +464,12 @@ func (t *Type) parseArray(ts *tokenStream) {
 // maps
 func (t *Type) parseMap(ts *tokenStream) {
 	t.Kind = reflect.Map
-	if ts.token() != "[" {
+	if ts.token != "[" {
 		panic(UnknownFormat)
 	}
 	ts.next()
 	t.Key = new(Type).parse(ts)
-	if ts.token() != "]" {
+	if ts.token != "]" {
 		panic(UnknownFormat)
 	}
 	ts.next()
@@ -440,14 +480,15 @@ func (t *Type) parseMap(ts *tokenStream) {
 func (t *Type) parseFunc(ts *tokenStream) *Type {
 	t.Kind = reflect.Func
 	t.In = parseParams(ts)
-	l := len(t.In)
-	if l != 0 && t.In[l-1].Type.Kind == reflect.Kind(200) {
-		a := t.In[l-1]
-		t.Elem = a.Type.Elem
-		a.Type = t.Elem
+	if len(t.In) != 0 {
+		last := t.In[len(t.In)-1]
+		if strings.HasSuffix(last.Name, "...") {
+			last.Name = last.Name[:len(last.Name)-3]
+			last.Value = "..."
+		}
 	}
-	if ts.p < len(ts.ts) && ts.token()[0] != ':' {
-		switch ts.token() {
+	if !ts.end() && ts.token[0] != ':' {
+		switch ts.token {
 		case ";", ",", "}", ")", "]":
 		case "(":
 			t.Out = parseParams(ts)
@@ -461,7 +502,7 @@ func (t *Type) parseFunc(ts *tokenStream) *Type {
 // channels
 func (t *Type) parseChan(ts *tokenStream) {
 	t.Kind = reflect.Chan
-	switch ts.token() {
+	switch ts.token {
 	case "chan":
 		t.Dir = reflect.BothDir
 	case "<-chan":
@@ -476,19 +517,19 @@ func (t *Type) parseChan(ts *tokenStream) {
 // structs
 func (t *Type) parseStruct(ts *tokenStream) {
 	t.Kind = reflect.Struct
-	if ts.token() != "{" {
+	if ts.token != "{" {
 		panic(UnknownFormat)
 	}
 	ts.next()
 	for !finished(ts, "}", ";") {
 		f := new(Item)
-		f.Name = ts.token()
+		f.Name = ts.token
 		ts.next()
 		f.Type = new(Type).parse(ts)
 		t.Field = append(t.Field, f)
-		// field tga
-		if ts.token()[0] == ':' {
-			tag, err := strconv.Unquote(ts.token()[1:])
+		// field tag
+		if ts.token[0] == ':' {
+			tag, err := strconv.Unquote(ts.token[1:])
 			if err != nil {
 				panic(err)
 			}
@@ -501,13 +542,13 @@ func (t *Type) parseStruct(ts *tokenStream) {
 // interfaces
 func (t *Type) parseInterface(ts *tokenStream) {
 	t.Kind = reflect.Interface
-	if ts.token() != "{" {
+	if ts.token != "{" {
 		panic(UnknownFormat)
 	}
 	ts.next()
 	for !finished(ts, "}", ";") {
 		m := new(Item)
-		m.Name = ts.token()
+		m.Name = ts.token
 		ts.next()
 		m.Type = new(Type).parseFunc(ts)
 		t.Method = append(t.Method, m)
@@ -540,29 +581,18 @@ var primCases = []primCase {
 	{"string", reflect.String},
 }
 
-// everything else
 func (t *Type) parseOther(ts *tokenStream) {
-	if strings.HasPrefix(ts.token(), "...") {
-		// create a ghost type that's swallowed by the function parser
-		t.Kind = reflect.Kind(200)
-		if ts.token() != "..." {
-			ts.ts[ts.p] = ts.token()[3:]
-		} else {
-			ts.next()
-		}
-		t.Elem = new(Type).parse(ts)
-		return
-	}
-	n := ts.token()
 	for _, c := range primCases {
-		if n == c.test {
+		if ts.token == c.test {
 			t.setPrim(c.kind)
 			ts.next()
 			return
 		}
 	}
+	// named types are currently invalid, they get fixed up in the resolution
+	// phase.
 	t.Kind = reflect.Invalid
-	t.Named = parseName(ts.token())
+	t.Named = parseName(ts.token)
 	ts.next()
 }
 
@@ -756,7 +786,8 @@ func (t *Type) match(query *Type) bool {
 		if len(t.Out) != len(query.Out) {
 			return false
 		}
-		return testTypes(t.In, query.In) && testTypes(t.Out, query.Out)
+		return testTypes(t.In, query.In) &&
+		       testTypes(t.Out, query.Out)
 	}
 	return false
 }
